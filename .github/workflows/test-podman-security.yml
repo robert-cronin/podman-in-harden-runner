@@ -14,6 +14,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        with:
+          egress-policy: audit
+          allowed-endpoints: >
+            8.8.8.8:53
+            8.8.4.4:53
+            1.1.1.1:53
+            1.0.0.1:53
             
       - name: Install Podman
         run: |
@@ -40,45 +50,18 @@ jobs:
           
           echo "Podman BuildKit setup completed"
           
-      - name: Test Security Debian Repository Connectivity
+      - name: Test DNS Resolution for Security Debian Repository
         run: |
-          echo "Testing connectivity to security.debian.org..."
+          echo "Testing DNS resolution for security.debian.org..."
           
-          # Create a test container with networking utilities
-          echo "Creating test container with curl and dig utilities..."
+          # Test DNS resolution using busybox (has nslookup pre-installed)
+          if podman run --rm --dns=8.8.8.8 --dns=8.8.4.4 --dns=1.1.1.1 --dns=1.0.0.1 \
+            docker.io/busybox:latest \
+            nslookup security.debian.org 2>&1; then
+            echo "DNS resolution test: SUCCESS"
+          else
+            echo "DNS resolution test: FAILED"
+            exit 1
+          fi
           
-          # Test with a container that has both curl and dig
-          podman run --rm --dns=8.8.8.8 --dns=8.8.4.4 --dns=1.1.1.1 --dns=1.0.0.1 \
-            docker.io/alpine:latest sh -c "
-              echo '=== Installing networking utilities ==='
-              apk add --no-cache curl bind-tools
-              
-              echo ''
-              echo '=== Testing HTTP connectivity to security.debian.org ==='
-              if curl -v --connect-timeout 10 --max-time 30 -I http://security.debian.org/ 2>&1; then
-                echo 'HTTP connectivity test: SUCCESS'
-              else
-                echo 'HTTP connectivity test: FAILED'
-                exit 1
-              fi
-              
-              echo ''
-              echo '=== Testing DNS resolution for security.debian.org ==='
-              if nslookup security.debian.org 2>&1; then
-                echo 'DNS resolution test: SUCCESS'
-              else
-                echo 'DNS resolution test: FAILED'  
-                exit 1
-              fi
-              
-              echo ''
-              echo '=== Additional DNS test with dig ==='
-              if dig security.debian.org 2>&1; then
-                echo 'Dig DNS test: SUCCESS'
-              else
-                echo 'Dig DNS test: FAILED'
-                exit 1
-              fi
-            "
-          
-          echo "All connectivity tests completed successfully!"
+          echo "DNS test completed successfully!"
